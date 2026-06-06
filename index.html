@@ -1,0 +1,1207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Geometry Dash ∞</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+  #root { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+  canvas { display: block; cursor: pointer; }
+  @keyframes pulse {
+    0%,100% { opacity:1; text-shadow: 0 0 20px currentColor, 0 0 40px currentColor; }
+    50% { opacity:0.75; text-shadow: 0 0 8px currentColor; }
+  }
+  @keyframes bounce {
+    0%,100% { transform: scale(1) translateY(0); }
+    50% { transform: scale(1.06) translateY(-3px); }
+  }
+  @keyframes shake {
+    0%   { transform: translate(0,0) rotate(0deg); }
+    20%  { transform: translate(-6px,2px) rotate(-2deg); }
+    40%  { transform: translate(6px,-2px) rotate(2deg); }
+    60%  { transform: translate(-4px,4px) rotate(-1deg); }
+    80%  { transform: translate(4px,-4px) rotate(1deg); }
+    100% { transform: translate(0,0) rotate(0deg); }
+  }
+  @keyframes fadeIn  { from { opacity:0; transform: translateY(20px); } to { opacity:1; transform: translateY(0); } }
+  @keyframes slideUp { from { opacity:0; transform: translateY(40px); } to { opacity:1; transform: translateY(0); } }
+  @keyframes pop     { 0% { transform:scale(0.5); opacity:0; } 70% { transform:scale(1.1); } 100% { transform:scale(1); opacity:1; } }
+  @keyframes spin    { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  @keyframes glowPulse {
+    0%,100% { box-shadow: 0 0 10px currentColor, 0 0 20px currentColor; }
+    50%      { box-shadow: 0 0 25px currentColor, 0 0 50px currentColor, 0 0 80px currentColor; }
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script>
+'use strict';
+const { useState, useEffect, useRef, useCallback, useMemo } = React;
+
+// ═══════════════════════════════════════════════════════════════════
+//  AUDIO ENGINE  — Web Audio API synthesised sounds, no files
+// ═══════════════════════════════════════════════════════════════════
+const Audio = (() => {
+  let ctx = null;
+  const get = () => {
+    if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
+    return ctx;
+  };
+  const tone = (freq, type, dur, vol = 0.3, delay = 0) => {
+    try {
+      const c = get();
+      const o = c.createOscillator();
+      const g = c.createGain();
+      o.connect(g); g.connect(c.destination);
+      o.type = type; o.frequency.value = freq;
+      const t = c.currentTime + delay;
+      g.gain.setValueAtTime(vol, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+      o.start(t); o.stop(t + dur);
+    } catch(e) {}
+  };
+  return {
+    jump:  () => { tone(480, 'square', 0.08, 0.25); tone(720, 'square', 0.06, 0.15, 0.04); },
+    land:  () => tone(160, 'sine',   0.06, 0.2),
+    die:   () => { tone(220, 'sawtooth', 0.15, 0.5); tone(150, 'sawtooth', 0.3, 0.4, 0.1); tone(100, 'sawtooth', 0.4, 0.3, 0.25); },
+    win:   () => { [523,659,784,1047,1318].forEach((f,i) => tone(f,'sine',0.35,0.45,i*0.11)); },
+    click: () => tone(800, 'sine', 0.05, 0.15),
+  };
+})();
+
+// ═══════════════════════════════════════════════════════════════════
+//  LEVEL DATA
+// ═══════════════════════════════════════════════════════════════════
+const T = 40; // tile size
+const LEVEL_LEN = 7200;
+const GROUND_Y  = 440;
+const PLAYER_W  = 34;
+const PLAYER_H  = 34;
+
+const mk = {
+  block:    (x, y, w = T, h = T)       => ({ type:'block',    x, y, w, h }),
+  spike:    (x, y)                      => ({ type:'spike',    x, y, w: T*0.85, h: T*0.85 }),
+  platform: (x, y, w)                  => ({ type:'platform', x, y, w, h: T*0.35 }),
+  saw:      (x, y, r = 18)             => ({ type:'saw',      x, y, r }),
+  dspike:   (x, y)                      => ({ type:'dspike',   x, y, w: T*0.85, h: T*0.85 }), // downward spike
+};
+
+// Shorthand helpers
+const sp  = (x, y)    => mk.spike(x, y);
+const bl  = (x, y, w, h) => mk.block(x, y, w, h);
+const plt = (x, y, w) => mk.platform(x, y, w);
+const saw = (x, y)    => mk.saw(x, y);
+const row = (start, count, y, fn) => Array.from({length:count}, (_,i) => fn(start + i*T, y));
+
+const LEVELS = [
+  // ── LEVEL 1: Stereo Madness ─────────────────────────────────────
+  {
+    name: 'STEREO MADNESS',
+    accentColor: '#00ffcc',
+    accentColor2: '#00aaff',
+    bgLayers: ['#020810', '#031420', '#041a30'],
+    groundColor: '#041a30',
+    groundLine: '#00ffcc',
+    bgStarCount: 100,
+    obstacles: [
+      // ground tiles under the whole level
+      ...row(0, 180, GROUND_Y, x => bl(x, GROUND_Y, T, 80)),
+
+      // section 1 — warmup spikes
+      sp(360, GROUND_Y - T),
+      sp(400, GROUND_Y - T),
+      sp(480, GROUND_Y - T),
+
+      // section 2 — platforms
+      plt(600, 320, T*3),
+      sp(720, GROUND_Y - T), sp(760, GROUND_Y - T),
+
+      // section 3 — saw blades
+      saw(940, GROUND_Y - T + 2), saw(1060, GROUND_Y - T + 2),
+
+      // section 4 — triple spikes
+      sp(1240,GROUND_Y-T), sp(1280,GROUND_Y-T), sp(1320,GROUND_Y-T),
+
+      // section 5 — elevated platforms
+      plt(1480, 300, T*2), plt(1640, 260, T*2),
+      sp(1800,GROUND_Y-T), sp(1840,GROUND_Y-T),
+
+      // section 6 — triple saw
+      saw(2000, GROUND_Y-T+2), saw(2120, GROUND_Y-T+2), saw(2240, GROUND_Y-T+2),
+
+      // section 7 — 5 spikes
+      sp(2480,GROUND_Y-T), sp(2520,GROUND_Y-T), sp(2560,GROUND_Y-T), sp(2600,GROUND_Y-T), sp(2640,GROUND_Y-T),
+
+      // section 8 — staircase platforms
+      plt(2840, 320, T*2), plt(3020, 280, T*2), plt(3200, 240, T*2),
+
+      // section 9
+      sp(3440,GROUND_Y-T), sp(3480,GROUND_Y-T), sp(3520,GROUND_Y-T),
+      saw(3680, GROUND_Y-T+2), saw(3800, GROUND_Y-T+2),
+
+      // section 10
+      sp(4000,GROUND_Y-T), sp(4040,GROUND_Y-T), sp(4080,GROUND_Y-T), sp(4120,GROUND_Y-T), sp(4160,GROUND_Y-T), sp(4200,GROUND_Y-T),
+
+      // section 11 — complex
+      saw(4400, GROUND_Y-T+2), plt(4540, 300, T*3),
+      sp(4760,GROUND_Y-T), sp(4800,GROUND_Y-T), sp(4840,GROUND_Y-T),
+
+      // section 12 — 4 saws
+      saw(5040, GROUND_Y-T+2), saw(5160, GROUND_Y-T+2), saw(5280, GROUND_Y-T+2), saw(5400, GROUND_Y-T+2),
+
+      // section 13 — finale
+      sp(5600,GROUND_Y-T), sp(5640,GROUND_Y-T), sp(5680,GROUND_Y-T), sp(5720,GROUND_Y-T), sp(5760,GROUND_Y-T),
+      saw(5940, GROUND_Y-T+2), saw(6060, GROUND_Y-T+2),
+      sp(6240,GROUND_Y-T), sp(6280,GROUND_Y-T), sp(6320,GROUND_Y-T), sp(6360,GROUND_Y-T), sp(6400,GROUND_Y-T), sp(6440,GROUND_Y-T),
+    ],
+  },
+
+  // ── LEVEL 2: Base After Base ────────────────────────────────────
+  {
+    name: 'BASE AFTER BASE',
+    accentColor: '#ff00ff',
+    accentColor2: '#aa00ff',
+    bgLayers: ['#0d0014', '#150020', '#1a0028'],
+    groundColor: '#1a0028',
+    groundLine: '#ff00ff',
+    bgStarCount: 140,
+    obstacles: [
+      ...row(0, 180, GROUND_Y, x => bl(x, GROUND_Y, T, 80)),
+
+      // denser from the start
+      sp(320,GROUND_Y-T), sp(360,GROUND_Y-T),
+      saw(480, GROUND_Y-T+2),
+      sp(600,GROUND_Y-T), sp(640,GROUND_Y-T), sp(680,GROUND_Y-T),
+
+      plt(820, 290, T*2), plt(980, 250, T*2),
+
+      sp(1120,GROUND_Y-T), sp(1160,GROUND_Y-T), sp(1200,GROUND_Y-T), sp(1240,GROUND_Y-T), sp(1280,GROUND_Y-T),
+
+      saw(1400,GROUND_Y-T+2), saw(1500,GROUND_Y-T+2),
+
+      sp(1640,GROUND_Y-T), sp(1680,GROUND_Y-T), sp(1720,GROUND_Y-T),
+
+      plt(1880,270,T*2), plt(2060,230,T*2), plt(2240,190,T*2),
+
+      sp(2420,GROUND_Y-T), sp(2460,GROUND_Y-T), sp(2500,GROUND_Y-T), sp(2540,GROUND_Y-T), sp(2580,GROUND_Y-T), sp(2620,GROUND_Y-T),
+
+      saw(2760,GROUND_Y-T+2), saw(2880,GROUND_Y-T+2), saw(3000,GROUND_Y-T+2),
+
+      sp(3160,GROUND_Y-T), sp(3200,GROUND_Y-T), sp(3240,GROUND_Y-T),
+
+      plt(3400,300,T*3),
+
+      sp(3640,GROUND_Y-T), sp(3680,GROUND_Y-T), sp(3720,GROUND_Y-T), sp(3760,GROUND_Y-T),
+
+      saw(3900,GROUND_Y-T+2), saw(4020,GROUND_Y-T+2), saw(4140,GROUND_Y-T+2), saw(4260,GROUND_Y-T+2),
+
+      sp(4440,GROUND_Y-T), sp(4480,GROUND_Y-T), sp(4520,GROUND_Y-T), sp(4560,GROUND_Y-T), sp(4600,GROUND_Y-T), sp(4640,GROUND_Y-T),
+
+      plt(4820,270,T*2), plt(5000,230,T*2),
+
+      sp(5180,GROUND_Y-T), sp(5220,GROUND_Y-T), sp(5260,GROUND_Y-T),
+
+      saw(5400,GROUND_Y-T+2), saw(5520,GROUND_Y-T+2), saw(5640,GROUND_Y-T+2), saw(5760,GROUND_Y-T+2),
+
+      sp(5960,GROUND_Y-T), sp(6000,GROUND_Y-T), sp(6040,GROUND_Y-T), sp(6080,GROUND_Y-T), sp(6120,GROUND_Y-T),
+
+      saw(6300,GROUND_Y-T+2), saw(6420,GROUND_Y-T+2),
+    ],
+  },
+];
+
+// ═══════════════════════════════════════════════════════════════════
+//  PHYSICS
+// ═══════════════════════════════════════════════════════════════════
+const GRAVITY    = 0.75;
+const JUMP_VY    = -15.5;
+const SPEED      = 5.5;
+
+// AABB
+const aabb = (a, b) =>
+  a.x < b.x+b.w && a.x+a.w > b.x && a.y < b.y+b.h && a.y+a.h > b.y;
+
+// Circle vs AABB
+const circleRect = (cx, cy, r, rx, ry, rw, rh) => {
+  const nx = Math.max(rx, Math.min(cx, rx+rw));
+  const ny = Math.max(ry, Math.min(cy, ry+rh));
+  return Math.hypot(cx-nx, cy-ny) < r;
+};
+
+// Spike point-in-triangle (tighter)
+const pointInTriangle = (px, py, ax, ay, bx, by, cx, cy) => {
+  const d1 = (px-bx)*(ay-by) - (ax-bx)*(py-by);
+  const d2 = (px-cx)*(by-cy) - (bx-cx)*(py-cy);
+  const d3 = (px-ax)*(cy-ay) - (cx-ax)*(py-ay);
+  const has_neg = (d1<0)||(d2<0)||(d3<0);
+  const has_pos = (d1>0)||(d2>0)||(d3>0);
+  return !(has_neg && has_pos);
+};
+const spikeHit = (pb, o, up=true) => {
+  // Sample corners of player hitbox against triangle
+  const margin = 3;
+  const tip_x = o.x + o.w/2, tip_y = up ? o.y + margin : o.y + o.h - margin;
+  const bl_x = o.x + margin, bl_y = up ? o.y + o.h - margin : o.y + margin;
+  const br_x = o.x + o.w - margin, br_y = bl_y;
+  const pts = [
+    [pb.x + 3, pb.y + 3], [pb.x + pb.w - 3, pb.y + 3],
+    [pb.x + 3, pb.y + pb.h - 3], [pb.x + pb.w - 3, pb.y + pb.h - 3],
+  ];
+  return pts.some(([px,py]) => pointInTriangle(px,py, tip_x,tip_y, bl_x,bl_y, br_x,br_y));
+};
+
+// ═══════════════════════════════════════════════════════════════════
+//  RENDERER  — pure canvas drawing functions
+// ═══════════════════════════════════════════════════════════════════
+const Renderer = {
+  drawBlock(ctx, x, y, w, h, accent) {
+    ctx.fillStyle = '#0a1428';
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(x+0.75, y+0.75, w-1.5, h-1.5);
+    // inner grid line
+    ctx.globalAlpha = 0.15;
+    ctx.fillStyle = accent;
+    ctx.fillRect(x+5, y+5, w-10, h-10);
+    ctx.globalAlpha = 1;
+  },
+
+  drawSpike(ctx, x, y, w, h, up = true) {
+    ctx.beginPath();
+    if (up) {
+      ctx.moveTo(x + w/2, y);
+      ctx.lineTo(x, y + h);
+      ctx.lineTo(x + w, y + h);
+    } else {
+      ctx.moveTo(x + w/2, y + h);
+      ctx.lineTo(x, y);
+      ctx.lineTo(x + w, y);
+    }
+    ctx.closePath();
+    const g = ctx.createLinearGradient(x, y, x, y+h);
+    g.addColorStop(0, '#ff5555');
+    g.addColorStop(1, '#990000');
+    ctx.fillStyle = g;
+    ctx.shadowBlur = 12; ctx.shadowColor = '#ff2222';
+    ctx.fill();
+    ctx.strokeStyle = '#ff8888'; ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+  },
+
+  drawPlatform(ctx, x, y, w, h, accent) {
+    ctx.fillStyle = '#0a1428';
+    ctx.fillRect(x, y, w, h);
+    ctx.fillStyle = accent;
+    ctx.shadowBlur = 10; ctx.shadowColor = accent;
+    ctx.fillRect(x, y, w, 3);
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 0.3;
+    ctx.fillStyle = accent;
+    ctx.fillRect(x, y+3, w, h-3);
+    ctx.globalAlpha = 1;
+  },
+
+  drawSaw(ctx, x, y, r, angle) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(angle);
+    // teeth
+    const teeth = 10;
+    ctx.beginPath();
+    for (let i = 0; i < teeth; i++) {
+      const a1 = (i / teeth) * Math.PI * 2;
+      const a2 = ((i + 0.5) / teeth) * Math.PI * 2;
+      const p1x = Math.cos(a1)*r, p1y = Math.sin(a1)*r;
+      const p2x = Math.cos(a2)*(r*0.55), p2y = Math.sin(a2)*(r*0.55);
+      i === 0 ? ctx.moveTo(p1x, p1y) : ctx.lineTo(p1x, p1y);
+      ctx.lineTo(p2x, p2y);
+    }
+    ctx.closePath();
+    const g = ctx.createRadialGradient(0,0,r*0.1, 0,0,r);
+    g.addColorStop(0, '#ff4444');
+    g.addColorStop(1, '#880000');
+    ctx.fillStyle = g;
+    ctx.shadowBlur = 18; ctx.shadowColor = '#ff1111';
+    ctx.fill();
+    ctx.strokeStyle = '#ff6666'; ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    // center hub
+    ctx.beginPath(); ctx.arc(0,0,r*0.22,0,Math.PI*2);
+    ctx.fillStyle = '#aaa'; ctx.fill();
+    ctx.beginPath(); ctx.arc(0,0,r*0.1,0,Math.PI*2);
+    ctx.fillStyle = '#333'; ctx.fill();
+    ctx.restore();
+  },
+
+  drawPlayer(ctx, x, y, rot, color, dead, alpha=1) {
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(x + PLAYER_W/2, y + PLAYER_H/2);
+    ctx.rotate(rot);
+    const s = PLAYER_W/2;
+    // glow
+    ctx.shadowBlur = 22; ctx.shadowColor = color;
+    // body
+    ctx.fillStyle = color;
+    ctx.fillRect(-s, -s, PLAYER_W, PLAYER_H);
+    // inner square
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.fillRect(-s+7, -s+7, PLAYER_W-14, PLAYER_H-14);
+    // X mark
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-8,-8); ctx.lineTo(8,8);
+    ctx.moveTo(8,-8);  ctx.lineTo(-8,8);
+    ctx.stroke();
+    // border
+    ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 1.5;
+    ctx.strokeRect(-s,-s, PLAYER_W, PLAYER_H);
+    ctx.shadowBlur = 0;
+    ctx.restore();
+  },
+
+  drawTrail(ctx, trail, color) {
+    trail.forEach((t, i) => {
+      const a = Math.max(0, 0.55 - t.age * 0.07);
+      const s = Math.max(2, PLAYER_W * (1 - t.age * 0.05));
+      ctx.save();
+      ctx.globalAlpha = a;
+      ctx.fillStyle = color;
+      ctx.shadowBlur = 6; ctx.shadowColor = color;
+      ctx.fillRect(t.x - s/2, t.y - s/2, s, s);
+      ctx.restore();
+    });
+  },
+
+  drawGhost(ctx, g, camX) {
+    const x = g.x - camX;
+    if (x < -60 || x > 960) return;
+    ctx.save();
+    ctx.globalAlpha = 0.45;
+    ctx.translate(x + PLAYER_W/2, g.y + PLAYER_H/2);
+    ctx.strokeStyle = g.color || '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.shadowBlur = 10; ctx.shadowColor = g.color || '#ffffff';
+    ctx.strokeRect(-PLAYER_W/2, -PLAYER_H/2, PLAYER_W, PLAYER_H);
+    // name tag
+    ctx.font = 'bold 9px Orbitron';
+    ctx.fillStyle = '#ffffffcc';
+    ctx.textAlign = 'center';
+    ctx.shadowBlur = 4;
+    ctx.fillText(g.name.slice(0,10), 0, -PLAYER_H/2 - 7);
+    ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+    ctx.restore();
+  },
+
+  background(ctx, W, H, layers, stars, camX, sawAngle, accentColor) {
+    // base gradient
+    ctx.fillStyle = layers[0];
+    ctx.fillRect(0, 0, W, H);
+    // mid layer subtle gradient
+    const bg = ctx.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0, layers[0]);
+    bg.addColorStop(0.7, layers[1]);
+    bg.addColorStop(1, layers[2]);
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, W, H);
+    // parallax stars
+    stars.forEach(s => {
+      const parallax = [0.05, 0.2, 0.55][s.layer];
+      const sx = ((s.x - camX * parallax) % (LEVEL_LEN * 1.5) + LEVEL_LEN * 1.5) % (LEVEL_LEN * 1.5);
+      if (sx > W + 10) return;
+      ctx.beginPath();
+      ctx.arc(sx, s.y, s.r, 0, Math.PI*2);
+      const flicker = 0.3 + 0.7 * Math.abs(Math.sin(Date.now()*0.001 + s.x));
+      ctx.fillStyle = `rgba(255,255,255,${flicker * [0.3,0.5,0.9][s.layer]})`;
+      ctx.fill();
+    });
+    // horizon glow
+    const hg = ctx.createLinearGradient(0, H*0.6, 0, H);
+    hg.addColorStop(0, `${accentColor}00`);
+    hg.addColorStop(1, `${accentColor}18`);
+    ctx.fillStyle = hg;
+    ctx.fillRect(0, H*0.6, W, H*0.4);
+  },
+
+  ground(ctx, W, groundY, camX, accentColor, groundColor) {
+    ctx.fillStyle = groundColor;
+    ctx.fillRect(0, groundY, W, 500);
+    // glow line
+    ctx.fillStyle = accentColor;
+    ctx.shadowBlur = 14; ctx.shadowColor = accentColor;
+    ctx.fillRect(0, groundY, W, 2);
+    ctx.shadowBlur = 0;
+  },
+
+  progressBar(ctx, W, pct, accentColor) {
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(0, 0, W, 8);
+    if (pct > 0) {
+      const grad = ctx.createLinearGradient(0,0,W*pct,0);
+      grad.addColorStop(0, `${accentColor}88`);
+      grad.addColorStop(1, accentColor);
+      ctx.fillStyle = grad;
+      ctx.shadowBlur = 10; ctx.shadowColor = accentColor;
+      ctx.fillRect(0, 0, W * Math.min(pct, 1), 8);
+      ctx.shadowBlur = 0;
+    }
+  },
+};
+
+// ═══════════════════════════════════════════════════════════════════
+//  BEAT INDICATOR  — visual BPM pulse synced to 174 BPM
+// ═══════════════════════════════════════════════════════════════════
+const BPM = 174;
+const BEAT_INTERVAL = 60000 / BPM;
+
+// ═══════════════════════════════════════════════════════════════════
+//  MAIN APP COMPONENT
+// ═══════════════════════════════════════════════════════════════════
+function App() {
+  const canvasRef    = useRef(null);
+  const gameRef      = useRef(null);   // mutable game state
+  const rafRef       = useRef(null);
+  const menuRafRef   = useRef(null);
+  const channelRef   = useRef(null);
+  const ghostsRef    = useRef({});
+  const deathFeedRef = useRef([]);
+  const shakeRef     = useRef({ x:0, y:0, t:0 });
+  const sawAngleRef  = useRef(0);
+  const beatRef      = useRef({ lastBeat: 0, pulse: 0 });
+
+  const [screen,       setScreen]       = useState('menu');      // menu | playing | dead | win
+  const [levelIdx,     setLevelIdx]     = useState(0);
+  const [attempts,     setAttempts]     = useState(0);
+  const [playerColor,  setPlayerColor]  = useState('#00ffcc');
+  const [trailColor,   setTrailColor]   = useState('#00ffcc');
+  const [username,     setUsername]     = useState(() => 'P' + Math.floor(Math.random()*90000+10000));
+  const [deathInfo,    setDeathInfo]    = useState({ pct: 0, attempt: 0 });
+  const [winInfo,      setWinInfo]      = useState({ time: '0.00', attempt: 0 });
+  const [ghosts,       setGhosts]       = useState([]);
+  const [leaderboard,  setLeaderboard]  = useState([]);
+  const [deathFeed,    setDeathFeed]    = useState([]);
+  const [winner,       setWinner]       = useState(null);
+  const [beatPulse,    setBeatPulse]    = useState(0);
+  const [transition,   setTransition]   = useState(false);  // fade overlay
+
+  // Canvas dimensions
+  const W = Math.min(window.innerWidth, 900);
+  const H = Math.min(window.innerHeight, 520);
+
+  // ── Multiplayer via BroadcastChannel ──────────────────────────
+  useEffect(() => {
+    try {
+      const ch = new BroadcastChannel('geodash_v3');
+      channelRef.current = ch;
+      ch.onmessage = ({ data: d }) => {
+        if (d.type === 'ghost') {
+          ghostsRef.current[d.id] = { ...d, lastSeen: Date.now() };
+        }
+        if (d.type === 'death') {
+          const msg = { text: `💀 ${d.name} died at ${d.pct}%`, id: Date.now() };
+          deathFeedRef.current = [msg, ...deathFeedRef.current].slice(0, 6);
+          setDeathFeed([...deathFeedRef.current]);
+        }
+        if (d.type === 'win' && !winner) {
+          setWinner(d.name);
+        }
+      };
+      return () => ch.close();
+    } catch(e) {}
+  }, []);
+
+  const broadcast = useCallback(data => {
+    try { channelRef.current?.postMessage(data); } catch(e) {}
+  }, []);
+
+  // ── BPM beat ticker ──────────────────────────────────────────
+  useEffect(() => {
+    const iv = setInterval(() => {
+      setBeatPulse(p => p + 1);
+      beatRef.current.pulse = (beatRef.current.pulse + 1) % 4;
+    }, BEAT_INTERVAL);
+    return () => clearInterval(iv);
+  }, []);
+
+  // ── MENU ANIMATION ───────────────────────────────────────────
+  const runMenuAnim = useCallback(() => {
+    const c = canvasRef.current;
+    if (!c) return;
+    const ctx = c.getContext('2d');
+    const menuCubes = Array.from({ length: 12 }, () => ({
+      x: Math.random() * W, y: Math.random() * H,
+      vx: (Math.random()-0.5)*1.2, vy: (Math.random()-0.5)*1.2,
+      size: 15+Math.random()*35, rot: Math.random()*Math.PI*2,
+      rv: (Math.random()-0.5)*0.04,
+      color: `hsl(${Math.floor(Math.random()*360)},100%,65%)`
+    }));
+    const stars = Array.from({ length: 200 }, () => ({
+      x: Math.random()*W, y: Math.random()*H,
+      r: Math.random()*1.8+0.3,
+      phase: Math.random()*Math.PI*2
+    }));
+    const particles = Array.from({ length: 60 }, () => ({
+      x: Math.random()*W, y: Math.random()*H,
+      vx: (Math.random()-0.5)*0.5, vy: (Math.random()-0.5)*0.5,
+      r: Math.random()*2+1,
+      color: Math.random()>0.5 ? '#00ffcc' : '#ff00ff',
+      alpha: Math.random()*0.8
+    }));
+    let frame = 0;
+    const loop = () => {
+      menuRafRef.current = requestAnimationFrame(loop);
+      frame++;
+      ctx.fillStyle = '#020810';
+      ctx.fillRect(0, 0, W, H);
+      // Stars
+      const now = Date.now() * 0.001;
+      stars.forEach(s => {
+        const a = 0.2 + 0.7*Math.abs(Math.sin(now*1.2 + s.phase));
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2);
+        ctx.fillStyle = `rgba(255,255,255,${a})`; ctx.fill();
+      });
+      // Particles
+      particles.forEach(p => {
+        p.x += p.vx; p.y += p.vy;
+        if (p.x<0) p.x=W; if (p.x>W) p.x=0;
+        if (p.y<0) p.y=H; if (p.y>H) p.y=0;
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI*2);
+        ctx.fillStyle = p.color + Math.floor(p.alpha*255).toString(16).padStart(2,'0');
+        ctx.fill();
+      });
+      // Floating cubes
+      menuCubes.forEach(cube => {
+        cube.x += cube.vx; cube.y += cube.vy; cube.rot += cube.rv;
+        if (cube.x < -60) cube.x = W+60; if (cube.x > W+60) cube.x = -60;
+        if (cube.y < -60) cube.y = H+60; if (cube.y > H+60) cube.y = -60;
+        ctx.save();
+        ctx.translate(cube.x, cube.y); ctx.rotate(cube.rot);
+        ctx.globalAlpha = 0.25;
+        ctx.fillStyle = cube.color;
+        ctx.shadowBlur = 16; ctx.shadowColor = cube.color;
+        ctx.fillRect(-cube.size/2, -cube.size/2, cube.size, cube.size);
+        ctx.strokeStyle = cube.color; ctx.lineWidth = 1.5;
+        ctx.strokeRect(-cube.size/2, -cube.size/2, cube.size, cube.size);
+        ctx.restore(); ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+      });
+    };
+    loop();
+  }, [W, H]);
+
+  // ── WIN CONFETTI ─────────────────────────────────────────────
+  const runWinAnim = useCallback(() => {
+    const c = canvasRef.current;
+    if (!c) return;
+    const ctx = c.getContext('2d');
+    const pieces = Array.from({ length: 160 }, () => ({
+      x: Math.random()*W, y: -20,
+      vx: (Math.random()-0.5)*5,
+      vy: Math.random()*5+2,
+      rot: Math.random()*Math.PI*2,
+      rv: (Math.random()-0.5)*0.3,
+      w: 8+Math.random()*12, h: 4+Math.random()*6,
+      color: `hsl(${Math.floor(Math.random()*360)},100%,60%)`,
+      alive: true
+    }));
+    const loop = () => {
+      menuRafRef.current = requestAnimationFrame(loop);
+      ctx.fillStyle = 'rgba(2,8,16,0.18)';
+      ctx.fillRect(0,0,W,H);
+      pieces.forEach(p => {
+        p.x+=p.vx; p.y+=p.vy; p.rot+=p.rv; p.vy+=0.06;
+        p.vx *= 0.99;
+        if (p.y > H+30) { p.y=-20; p.x=Math.random()*W; p.vy=Math.random()*3+1; }
+        ctx.save();
+        ctx.translate(p.x,p.y); ctx.rotate(p.rot);
+        ctx.fillStyle=p.color;
+        ctx.shadowBlur=6; ctx.shadowColor=p.color;
+        ctx.fillRect(-p.w/2,-p.h/2,p.w,p.h);
+        ctx.restore(); ctx.shadowBlur=0;
+      });
+    };
+    loop();
+  }, [W, H]);
+
+  // ── GAME LOOP ─────────────────────────────────────────────────
+  const startGame = useCallback((lvlIdx) => {
+    cancelAnimationFrame(menuRafRef.current);
+    cancelAnimationFrame(rafRef.current);
+    const level = LEVELS[lvlIdx];
+    const stars = Array.from({ length: level.bgStarCount }, () => ({
+      x: Math.random() * LEVEL_LEN * 1.5,
+      y: Math.random() * (GROUND_Y - 40),
+      r: Math.random()*1.8+0.3,
+      layer: Math.floor(Math.random()*3)
+    }));
+    const state = {
+      player: {
+        x: 80, y: GROUND_Y - PLAYER_H,
+        vy: 0, onGround: false,
+        dead: false, won: false,
+        rot: 0, trail: [],
+        deadAlpha: 1,
+      },
+      camX: 0,
+      obstacles: level.obstacles.map(o => ({ ...o })),
+      stars,
+      startTime: Date.now(),
+      lastBroadcast: 0,
+      deadTimer: 0,
+    };
+    gameRef.current = state;
+    sawAngleRef.current = 0;
+    shakeRef.current = { x:0, y:0, t:0 };
+
+    const c = canvasRef.current;
+    const ctx = c.getContext('2d');
+    let lastTime = performance.now();
+
+    const loop = (now) => {
+      rafRef.current = requestAnimationFrame(loop);
+      const raw = Math.min((now - lastTime) / 16.667, 3.5);
+      const dt = raw;
+      lastTime = now;
+      const st = gameRef.current;
+      if (!st) return;
+      const p = st.player;
+
+      sawAngleRef.current += 0.06 * dt;
+
+      if (!p.dead && !p.won) {
+        // ── physics
+        p.vy = Math.min(p.vy + GRAVITY * dt, 28);
+        p.y  += p.vy * dt;
+        p.x  += SPEED * dt;
+        p.rot += (p.onGround ? 0.07 : 0.14) * dt;
+
+        // ground collision
+        const gY = GROUND_Y - PLAYER_H;
+        p.onGround = false;
+        if (p.y >= gY) { p.y = gY; p.vy = 0; p.onGround = true; }
+
+        // platform collisions
+        st.obstacles.forEach(o => {
+          if (o.type !== 'platform') return;
+          if (p.x + PLAYER_W > o.x && p.x < o.x + o.w) {
+            const prevBottom = p.y + PLAYER_H - p.vy * dt;
+            if (p.vy >= 0 && p.y + PLAYER_H >= o.y && prevBottom <= o.y + o.h) {
+              p.y = o.y - PLAYER_H;
+              p.vy = 0;
+              p.onGround = true;
+            }
+          }
+        });
+
+        // camera
+        const targetCam = p.x - W * 0.15;
+        st.camX += (targetCam - st.camX) * 0.1 * dt;
+        if (st.camX < 0) st.camX = 0;
+
+        // trail
+        p.trail.push({ x: p.x + PLAYER_W/2, y: p.y + PLAYER_H/2, age: 0 });
+        if (p.trail.length > 22) p.trail.shift();
+        p.trail.forEach(t => t.age += dt * 0.9);
+
+        // ── WIN
+        if (p.x > LEVEL_LEN - 200) {
+          p.won = true;
+          Audio.win();
+          const elapsed = ((Date.now() - st.startTime) / 1000).toFixed(2);
+          setTimeout(() => {
+            setWinInfo({ time: elapsed, attempt: attempts + 1 });
+            broadcast({ type:'win', name: username });
+            goToScreen('win');
+          }, 400);
+          return;
+        }
+
+        // ── COLLISION
+        const pb = { x: p.x+5, y: p.y+5, w: PLAYER_W-10, h: PLAYER_H-10 };
+        let died = false;
+        for (const o of st.obstacles) {
+          if (o.type === 'spike' || o.type === 'dspike') {
+            if (spikeHit(pb, o, o.type==='spike')) { died=true; break; }
+          } else if (o.type === 'saw') {
+            if (circleRect(o.x, o.y, o.r - 3, pb.x, pb.y, pb.w, pb.h)) { died=true; break; }
+          }
+        }
+        if (died) {
+          p.dead = true;
+          Audio.die();
+          shakeRef.current.t = 25;
+          const pct = Math.floor((p.x / LEVEL_LEN) * 100);
+          broadcast({ type:'death', name: username, pct });
+          const msg = { text: `💀 ${username} died at ${pct}%`, id: Date.now() };
+          deathFeedRef.current = [msg, ...deathFeedRef.current].slice(0, 6);
+          setDeathFeed([...deathFeedRef.current]);
+          setDeathInfo({ pct, attempt: attempts+1 });
+          setTimeout(() => { setAttempts(a=>a+1); goToScreen('dead'); }, 700);
+        }
+
+        // ── BROADCAST ghost position
+        if (now - st.lastBroadcast > 80) {
+          st.lastBroadcast = now;
+          const pct = Math.floor((p.x / LEVEL_LEN) * 100);
+          broadcast({ type:'ghost', id: username, name: username, x: p.x, y: p.y, pct, color: playerColor, lvl: lvlIdx });
+          // prune stale ghosts
+          const nowMs = Date.now();
+          Object.keys(ghostsRef.current).forEach(k => {
+            if (nowMs - ghostsRef.current[k].lastSeen > 4000) delete ghostsRef.current[k];
+          });
+          const myPct = pct;
+          const lb = [{ name: username, pct: myPct, self: true, color: playerColor }];
+          Object.values(ghostsRef.current).forEach(g => {
+            if (g.lvl === lvlIdx) lb.push({ name: g.name, pct: g.pct, self: false, color: g.color });
+          });
+          lb.sort((a,b) => b.pct - a.pct);
+          setLeaderboard(lb);
+          setGhosts(Object.values(ghostsRef.current).filter(g => g.lvl === lvlIdx));
+        }
+      } else if (p.dead) {
+        p.deadAlpha = Math.max(0, p.deadAlpha - 0.04 * dt);
+      }
+
+      // ── SHAKE
+      const sh = shakeRef.current;
+      if (sh.t > 0) { sh.t -= dt; sh.x = (Math.random()-0.5)*10; sh.y = (Math.random()-0.5)*10; }
+      else { sh.x=0; sh.y=0; }
+
+      // ══ DRAW ══════════════════════════════════════════════════
+      ctx.save();
+      ctx.translate(sh.x, sh.y);
+
+      Renderer.background(ctx, W, H, level.bgLayers, st.stars, st.camX, sawAngleRef.current, level.accentColor);
+      Renderer.ground(ctx, W, GROUND_Y, st.camX, level.accentColor, level.groundColor);
+
+      // obstacles
+      st.obstacles.forEach(o => {
+        const ox = o.x - st.camX;
+        if (ox < -100 || ox > W + 100) return;
+        if (o.type==='block')    Renderer.drawBlock(ctx, ox, o.y, o.w, o.h, level.accentColor);
+        if (o.type==='spike')    Renderer.drawSpike(ctx, ox, o.y, o.w, o.h, true);
+        if (o.type==='dspike')   Renderer.drawSpike(ctx, ox, o.y, o.w, o.h, false);
+        if (o.type==='platform') Renderer.drawPlatform(ctx, ox, o.y, o.w, o.h, level.accentColor);
+        if (o.type==='saw')      Renderer.drawSaw(ctx, ox, o.y, o.r, sawAngleRef.current);
+      });
+
+      // ghost cubes from other tabs
+      Object.values(ghostsRef.current).forEach(g => {
+        if (g.lvl !== lvlIdx) return;
+        Renderer.drawGhost(ctx, g, st.camX);
+      });
+
+      // trail + player
+      const pxDraw = p.x - st.camX;
+      Renderer.drawTrail(ctx, p.trail.map(t => ({ ...t, x: t.x - st.camX })), trailColor);
+      Renderer.drawPlayer(ctx, pxDraw, p.y, p.rot, playerColor, p.dead, p.dead ? p.deadAlpha : 1);
+
+      // death flash
+      if (p.dead && shakeRef.current.t > 0) {
+        ctx.fillStyle = `rgba(255,30,30,${shakeRef.current.t/25*0.35})`;
+        ctx.fillRect(-20,-20,W+40,H+40);
+      }
+
+      ctx.restore();
+
+      // progress bar
+      const pct2 = p.x / LEVEL_LEN;
+      Renderer.progressBar(ctx, W, pct2, level.accentColor);
+
+      // HUD text
+      ctx.font = '11px Orbitron';
+      ctx.textAlign = 'left';
+      ctx.fillStyle = 'rgba(255,255,255,0.75)';
+      ctx.shadowBlur = 4; ctx.shadowColor = level.accentColor;
+      ctx.fillText(`${Math.floor(Math.min(pct2,1)*100)}%`, 10, 25);
+      ctx.textAlign = 'right';
+      ctx.fillText(`Attempt ${attempts+1}`, W-10, 25);
+      ctx.shadowBlur = 0;
+
+      // beat pulse indicator
+      const bp = beatRef.current.pulse;
+      ctx.beginPath();
+      ctx.arc(W/2, 20, 5 + bp*0.5, 0, Math.PI*2);
+      ctx.fillStyle = `${level.accentColor}${bp===0?'ff':'44'}`;
+      ctx.shadowBlur = bp===0?12:0; ctx.shadowColor=level.accentColor;
+      ctx.fill(); ctx.shadowBlur=0;
+    };
+    loop(performance.now());
+  }, [W, H, attempts, playerColor, trailColor, username, broadcast]);
+
+  // ── Screen transitions ────────────────────────────────────────
+  const goToScreen = useCallback((s) => {
+    setTransition(true);
+    setTimeout(() => { setScreen(s); setTransition(false); }, 300);
+  }, []);
+
+  useEffect(() => {
+    cancelAnimationFrame(menuRafRef.current);
+    cancelAnimationFrame(rafRef.current);
+    if (screen === 'menu') runMenuAnim();
+    if (screen === 'playing') startGame(levelIdx);
+    if (screen === 'win') runWinAnim();
+    if (screen === 'dead') {
+      const c = canvasRef.current;
+      if (c) {
+        const ctx = c.getContext('2d');
+        ctx.fillStyle = '#020810';
+        ctx.fillRect(0,0,W,H);
+      }
+    }
+  }, [screen, levelIdx]);
+
+  // ── Jump handler ──────────────────────────────────────────────
+  const handleJump = useCallback(() => {
+    if (screen !== 'playing') return;
+    const st = gameRef.current;
+    if (!st) return;
+    const p = st.player;
+    if (p.dead || p.won) return;
+    if (p.onGround) {
+      p.vy = JUMP_VY;
+      p.onGround = false;
+      Audio.jump();
+    }
+  }, [screen]);
+
+  useEffect(() => {
+    const onKey = e => {
+      if (e.code === 'Space' || e.code === 'ArrowUp') { e.preventDefault(); handleJump(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [handleJump]);
+
+  // ── PALETTE ───────────────────────────────────────────────────
+  const PALETTE = ['#00ffcc','#ff00ff','#ffff00','#ff6600','#00aaff','#ff0066','#88ff00','#ff88ff','#00ffff'];
+
+  // ── STYLES ────────────────────────────────────────────────────
+  const S = {
+    overlay: {
+      position:'absolute', inset:0, display:'flex', flexDirection:'column',
+      alignItems:'center', justifyContent:'center', fontFamily:"'Orbitron',monospace",
+    },
+    title: (color) => ({
+      fontFamily:"'Press Start 2P',monospace",
+      color, textShadow:`0 0 18px ${color},0 0 36px ${color},0 0 72px ${color}66`,
+      animation:'pulse 2s ease-in-out infinite', lineHeight:1.4,
+    }),
+    btn: (color, size=11) => ({
+      fontFamily:"'Press Start 2P',monospace", fontSize:size,
+      padding:'11px 18px', background:'transparent',
+      border:`2px solid ${color}`, color, cursor:'pointer',
+      boxShadow:`0 0 14px ${color}55, inset 0 0 10px ${color}18`,
+      letterSpacing:1, transition:'all 0.18s', outline:'none',
+    }),
+    hoverBtn: (color) => ({
+      background:`${color}22`,
+      boxShadow:`0 0 28px ${color}88, inset 0 0 18px ${color}33`,
+      transform:'scale(1.05)',
+    }),
+  };
+
+  const [hoveredBtn, setHoveredBtn] = useState(null);
+  const btnProps = (id, color, extraStyle={}) => ({
+    style: { ...S.btn(color), ...(hoveredBtn===id ? S.hoverBtn(color) : {}), ...extraStyle },
+    onMouseEnter: () => setHoveredBtn(id),
+    onMouseLeave: () => setHoveredBtn(null),
+    onClick: () => Audio.click(),
+  });
+
+  const lv = LEVELS[levelIdx];
+
+  return (
+    <div style={{ position:'relative', width:W, height:H, overflow:'hidden', userSelect:'none' }}>
+      {/* CANVAS */}
+      <canvas
+        ref={canvasRef} width={W} height={H}
+        style={{ display:'block', background:'#020810' }}
+        onClick={handleJump}
+        onTouchStart={e => { e.preventDefault(); handleJump(); }}
+      />
+
+      {/* TRANSITION FADE */}
+      {transition && (
+        <div style={{
+          position:'absolute',inset:0,background:'#000',
+          animation:'fadeIn 0.3s ease forwards',
+          opacity:1,pointerEvents:'none',zIndex:100
+        }}/>
+      )}
+
+      {/* ══ MENU ══════════════════════════════════════════════ */}
+      {screen === 'menu' && (
+        <div style={{...S.overlay, background:'linear-gradient(180deg,rgba(0,0,0,0.1)0%,rgba(0,0,0,0.65)100%)'}}>
+          <div style={{ textAlign:'center', marginBottom:28, animation:'slideUp 0.5s ease' }}>
+            <div style={{ ...S.title('#00ffcc'), fontSize:W>600?34:18, marginBottom:4 }}>GEOMETRY</div>
+            <div style={{ ...S.title('#ff00ff'), fontSize:W>600?34:18, animationDelay:'0.4s' }}>DASH ∞</div>
+            <div style={{ color:'#44aaff44', fontSize:9, letterSpacing:4, marginTop:8 }}>MULTIPLAYER EDITION</div>
+          </div>
+
+          {/* Beat indicator row */}
+          <div style={{ display:'flex', gap:6, marginBottom:18 }}>
+            {[0,1,2,3].map(i => (
+              <div key={i} style={{
+                width:8, height:8, borderRadius:'50%',
+                background: beatPulse % 4 === i ? '#00ffcc' : '#00ffcc22',
+                boxShadow: beatPulse % 4 === i ? '0 0 10px #00ffcc' : 'none',
+                transition:'all 0.05s'
+              }}/>
+            ))}
+            <span style={{ color:'#ffffff44', fontSize:8, letterSpacing:2, marginLeft:6 }}>{BPM} BPM</span>
+          </div>
+
+          {/* Username */}
+          <div style={{ marginBottom:14, display:'flex', alignItems:'center', gap:10 }}>
+            <span style={{ color:'#888', fontSize:9, letterSpacing:2 }}>NAME:</span>
+            <input
+              value={username}
+              onChange={e => setUsername(e.target.value.slice(0,12))}
+              style={{
+                background:'transparent', border:'1px solid #00ffcc44',
+                color:'#00ffcc', fontFamily:"'Orbitron',monospace", fontSize:11,
+                padding:'5px 10px', outline:'none', width:130, textAlign:'center',
+                boxShadow:'0 0 10px #00ffcc22'
+              }}
+            />
+          </div>
+
+          {/* Cube color picker */}
+          <div style={{ marginBottom:20, display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', justifyContent:'center' }}>
+            <span style={{ color:'#888', fontSize:9, letterSpacing:2 }}>CUBE:</span>
+            {PALETTE.map(c => (
+              <div key={c} onClick={() => { setPlayerColor(c); setTrailColor(c); Audio.click(); }}
+                style={{
+                  width:22, height:22, background:c, borderRadius:4, cursor:'pointer',
+                  border: playerColor===c ? '2px solid #fff' : '2px solid transparent',
+                  boxShadow: `0 0 ${playerColor===c?14:5}px ${c}`,
+                  transition:'all 0.15s', transform: playerColor===c ? 'scale(1.2)' : 'scale(1)',
+                }}
+              />
+            ))}
+          </div>
+
+          {/* Level select */}
+          <div style={{ display:'flex', gap:14, marginBottom:24, flexWrap:'wrap', justifyContent:'center' }}>
+            {LEVELS.map((lv, i) => (
+              <button key={i}
+                {...btnProps(`lv${i}`, lv.accentColor)}
+                onClick={() => { setLevelIdx(i); setAttempts(0); setWinner(null); Audio.click(); goToScreen('playing'); }}
+                style={{ ...S.btn(lv.accentColor, 8), ...(hoveredBtn===`lv${i}` ? S.hoverBtn(lv.accentColor) : {}) }}
+              >
+                LVL {i+1}<br/><span style={{fontSize:7,color:`${lv.accentColor}99`}}>{lv.name}</span>
+              </button>
+            ))}
+          </div>
+
+          <div style={{ color:'#55aaaa', fontSize:9, letterSpacing:2, marginBottom:4 }}>SPACE / CLICK / TAP TO JUMP</div>
+          <div style={{ color:'#334455', fontSize:8, letterSpacing:1 }}>OPEN IN MULTIPLE TABS FOR MULTIPLAYER</div>
+
+          {/* Death feed */}
+          {deathFeed.length > 0 && (
+            <div style={{ position:'absolute', bottom:14, left:14 }}>
+              {deathFeed.map(d => (
+                <div key={d.id} style={{ color:'rgba(255,80,80,0.6)', fontSize:8, lineHeight:2, letterSpacing:1 }}>{d.text}</div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ══ PLAYING HUD ═══════════════════════════════════════ */}
+      {screen === 'playing' && (
+        <>
+          {/* Leaderboard */}
+          <div style={{
+            position:'absolute', top:14, right:10,
+            background:'rgba(0,0,0,0.72)', backdropFilter:'blur(4px)',
+            border:`1px solid ${lv.accentColor}33`, padding:'8px 12px', minWidth:140,
+            boxShadow:`0 0 20px ${lv.accentColor}18`, fontFamily:"'Orbitron',monospace",
+          }}>
+            <div style={{ color:lv.accentColor, fontSize:8, letterSpacing:2, marginBottom:7 }}>⚡ LIVE RACE</div>
+            {leaderboard.slice(0,6).map((p,i) => (
+              <div key={p.name} style={{
+                display:'flex', justifyContent:'space-between', gap:8,
+                color: p.self ? '#ffffff' : `${p.color||'#aaa'}cc`,
+                fontSize:8, lineHeight:1.9, fontWeight: p.self?700:400,
+              }}>
+                <span>{i+1}. {p.name.slice(0,9)}</span>
+                <span style={{color:lv.accentColor}}>{p.pct}%</span>
+              </div>
+            ))}
+            {leaderboard.length <= 1 && (
+              <div style={{color:'#444',fontSize:7,marginTop:4}}>open more tabs<br/>for multiplayer</div>
+            )}
+          </div>
+
+          {/* Death feed */}
+          {deathFeed.length > 0 && (
+            <div style={{ position:'absolute', bottom:14, left:10, fontFamily:"'Orbitron',monospace" }}>
+              {deathFeed.map(d => (
+                <div key={d.id} style={{
+                  color:'rgba(255,80,80,0.75)', fontSize:8, lineHeight:1.9,
+                  background:'rgba(0,0,0,0.5)', padding:'1px 7px', marginBottom:2
+                }}>{d.text}</div>
+              ))}
+            </div>
+          )}
+
+          {/* Beat bar */}
+          <div style={{
+            position:'absolute', bottom:14, right:10,
+            display:'flex', gap:5, alignItems:'center', fontFamily:"'Orbitron',monospace"
+          }}>
+            {[0,1,2,3].map(i => (
+              <div key={i} style={{
+                width:6, height:6, borderRadius:'50%',
+                background: beatPulse%4===i ? lv.accentColor : `${lv.accentColor}22`,
+                boxShadow: beatPulse%4===i ? `0 0 8px ${lv.accentColor}` : 'none',
+                transition:'all 0.05s'
+              }}/>
+            ))}
+          </div>
+
+          {/* Winner banner */}
+          {winner && (
+            <div style={{
+              position:'absolute', top:'50%', left:'50%', transform:'translate(-50%,-50%)',
+              fontFamily:"'Press Start 2P',monospace", textAlign:'center',
+              background:'rgba(0,0,0,0.88)', padding:'22px 32px',
+              border:'2px solid #ffff00', boxShadow:'0 0 40px #ffff0066',
+              animation:'pop 0.4s ease',
+            }}>
+              <div style={{ color:'#ffff00', fontSize:14, textShadow:'0 0 20px #ffff00', marginBottom:8 }}>🏆 RACE WINNER</div>
+              <div style={{ color:'#00ffcc', fontSize:12 }}>{winner}</div>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ══ DEAD SCREEN ═══════════════════════════════════════ */}
+      {screen === 'dead' && (
+        <div style={{
+          ...S.overlay,
+          background:'rgba(15,0,0,0.93)',
+          animation:'fadeIn 0.3s ease',
+        }}>
+          <div style={{
+            fontFamily:"'Press Start 2P',monospace",
+            fontSize: W>600 ? 30 : 18,
+            color:'#ff3333',
+            textShadow:'0 0 20px #ff0000,0 0 40px #ff000066',
+            animation:'shake 0.4s ease, pulse 1.5s ease 0.4s infinite',
+            marginBottom:16,
+          }}>YOU DIED</div>
+
+          <div style={{ color:'#ff6666', fontSize:12, marginBottom:6, fontFamily:"'Orbitron',monospace" }}>
+            ATTEMPT #{deathInfo.attempt}
+          </div>
+          <div style={{ marginBottom:28 }}>
+            <span style={{ fontFamily:"'Orbitron',monospace", fontSize:28, color: deathInfo.pct>50?'#ffaa44':'#ff6666',
+              textShadow:`0 0 15px ${deathInfo.pct>50?'#ffaa44':'#ff6666'}` }}>
+              {deathInfo.pct}%
+            </span>
+            <span style={{ color:'#555', fontSize:10, fontFamily:"'Orbitron',monospace", marginLeft:6 }}>REACHED</span>
+          </div>
+
+          {/* progress vis */}
+          <div style={{ width:240, height:8, background:'#111', border:'1px solid #333', marginBottom:28, position:'relative' }}>
+            <div style={{
+              width:`${deathInfo.pct}%`, height:'100%',
+              background: `linear-gradient(90deg, ${lv.accentColor}88, ${lv.accentColor})`,
+              boxShadow:`0 0 8px ${lv.accentColor}`,
+            }}/>
+            <div style={{
+              position:'absolute', top:-4, left:`${deathInfo.pct}%`, transform:'translateX(-50%)',
+              width:16, height:16, background:'#ff3333',
+              clipPath:'polygon(50% 0%, 0% 100%, 100% 100%)',
+              filter:'drop-shadow(0 0 4px #ff0000)'
+            }}/>
+          </div>
+
+          <div style={{ display:'flex', gap:14 }}>
+            <button
+              {...btnProps('retry','#ff3333')}
+              onClick={() => { Audio.click(); setScreen('playing'); }}
+              style={{ ...S.btn('#ff3333',10), ...(hoveredBtn==='retry'?S.hoverBtn('#ff3333'):{}), animation:'bounce 1s ease infinite' }}
+            >↺ RETRY</button>
+            <button
+              {...btnProps('dmenu','#444')}
+              onClick={() => { Audio.click(); setAttempts(0); setWinner(null); goToScreen('menu'); }}
+              style={{ ...S.btn('#444',10), ...(hoveredBtn==='dmenu'?S.hoverBtn('#666'):{}) }}
+            >MENU</button>
+          </div>
+
+          {deathFeed.length > 0 && (
+            <div style={{ position:'absolute', bottom:14, left:14, fontFamily:"'Orbitron',monospace" }}>
+              {deathFeed.map(d => (
+                <div key={d.id} style={{ color:'rgba(255,80,80,0.55)', fontSize:8, lineHeight:1.8 }}>{d.text}</div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ══ WIN SCREEN ════════════════════════════════════════ */}
+      {screen === 'win' && (
+        <div style={{ ...S.overlay, animation:'fadeIn 0.4s ease' }}>
+          <div style={{
+            fontFamily:"'Press Start 2P',monospace",
+            fontSize: W>600?28:16,
+            color:'#ffff00',
+            textShadow:'0 0 24px #ffff00, 0 0 50px #ffff0066',
+            animation:'pulse 1s ease infinite',
+            marginBottom:16,
+          }}>LEVEL COMPLETE!</div>
+
+          <div style={{ fontFamily:"'Orbitron',monospace", textAlign:'center', marginBottom:24 }}>
+            <div style={{ fontSize:44, color: lv.accentColor, textShadow:`0 0 20px ${lv.accentColor}`, lineHeight:1.2 }}>
+              {winInfo.time}s
+            </div>
+            <div style={{ color:'#666', fontSize:10, letterSpacing:2 }}>COMPLETION TIME</div>
+            <div style={{ color:'#888', fontSize:11, marginTop:8 }}>Attempts: {winInfo.attempt}</div>
+            <div style={{ color:'#555', fontSize:10 }}>{lv.name}</div>
+          </div>
+
+          <div style={{ display:'flex', gap:12, flexWrap:'wrap', justifyContent:'center' }}>
+            <button
+              {...btnProps('wretry', lv.accentColor, 9)}
+              onClick={() => { Audio.click(); setAttempts(0); setWinner(null); goToScreen('playing'); }}
+              style={{ ...S.btn(lv.accentColor,9), ...(hoveredBtn==='wretry'?S.hoverBtn(lv.accentColor):{}) }}
+            >↺ PLAY AGAIN</button>
+
+            {levelIdx < LEVELS.length - 1 && (
+              <button
+                {...btnProps('wnext', LEVELS[levelIdx+1].accentColor, 9)}
+                onClick={() => { Audio.click(); setLevelIdx(i=>i+1); setAttempts(0); setWinner(null); goToScreen('playing'); }}
+                style={{ ...S.btn(LEVELS[levelIdx+1].accentColor,9), ...(hoveredBtn==='wnext'?S.hoverBtn(LEVELS[levelIdx+1].accentColor):{}) }}
+              >NEXT LEVEL →</button>
+            )}
+
+            <button
+              {...btnProps('wmenu','#444',9)}
+              onClick={() => { Audio.click(); setAttempts(0); setWinner(null); goToScreen('menu'); }}
+              style={{ ...S.btn('#444',9), ...(hoveredBtn==='wmenu'?S.hoverBtn('#666'):{}) }}
+            >MENU</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+</script>
+</body>
+</html>
