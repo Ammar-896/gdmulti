@@ -102,7 +102,7 @@ const saw = (x, y)    => mk.saw(x, y);
 const row = (start, count, y, fn) => Array.from({length:count}, (_,i) => fn(start + i*T, y));
 
 const LEVELS = [
-  // ── LEVEL 1: Stereo Madness ─────────────────────────────────────
+  // ── LEVEL 1: Stereo Madness (EASIER) ────────────────────────────
   {
     name: 'STEREO MADNESS',
     accentColor: '#00ffcc',
@@ -112,59 +112,51 @@ const LEVELS = [
     groundLine: '#00ffcc',
     bgStarCount: 100,
     obstacles: [
-      // ground tiles under the whole level
       ...row(0, 180, GROUND_Y, x => bl(x, GROUND_Y, T, 80)),
 
-      // section 1 — warmup spikes
-      sp(360, GROUND_Y - T),
-      sp(400, GROUND_Y - T),
-      sp(480, GROUND_Y - T),
+      // section 1 — just 2 spikes with big gaps
+      sp(500, GROUND_Y - T),
+      sp(700, GROUND_Y - T),
 
-      // section 2 — platforms
-      plt(600, 320, T*3),
-      sp(720, GROUND_Y - T), sp(760, GROUND_Y - T),
+      // section 2 — platforms, no traps
+      plt(900, 330, T*4),
+      sp(1100, GROUND_Y - T),
 
-      // section 3 — saw blades
-      saw(940, GROUND_Y - T + 2), saw(1060, GROUND_Y - T + 2),
+      // section 3 — single saw, plenty of space
+      saw(1400, GROUND_Y - T + 2),
 
-      // section 4 — triple spikes
-      sp(1240,GROUND_Y-T), sp(1280,GROUND_Y-T), sp(1320,GROUND_Y-T),
+      // section 4 — 2 spikes wide gap
+      sp(1700, GROUND_Y-T), sp(1760, GROUND_Y-T),
 
       // section 5 — elevated platforms
-      plt(1480, 300, T*2), plt(1640, 260, T*2),
-      sp(1800,GROUND_Y-T), sp(1840,GROUND_Y-T),
+      plt(2000, 310, T*3), plt(2280, 280, T*3),
+      sp(2550, GROUND_Y-T),
 
-      // section 6 — triple saw
-      saw(2000, GROUND_Y-T+2), saw(2120, GROUND_Y-T+2), saw(2240, GROUND_Y-T+2),
+      // section 6 — single saw
+      saw(2800, GROUND_Y-T+2),
 
-      // section 7 — 5 spikes
-      sp(2480,GROUND_Y-T), sp(2520,GROUND_Y-T), sp(2560,GROUND_Y-T), sp(2600,GROUND_Y-T), sp(2640,GROUND_Y-T),
+      // section 7 — 3 spikes spread out
+      sp(3100, GROUND_Y-T), sp(3220, GROUND_Y-T), sp(3340, GROUND_Y-T),
 
-      // section 8 — staircase platforms
-      plt(2840, 320, T*2), plt(3020, 280, T*2), plt(3200, 240, T*2),
+      // section 8 — staircase platforms easy
+      plt(3600, 330, T*3), plt(3900, 300, T*3), plt(4200, 270, T*3),
 
-      // section 9
-      sp(3440,GROUND_Y-T), sp(3480,GROUND_Y-T), sp(3520,GROUND_Y-T),
-      saw(3680, GROUND_Y-T+2), saw(3800, GROUND_Y-T+2),
+      // section 9 — 2 spikes + 1 saw
+      sp(4500, GROUND_Y-T), sp(4620, GROUND_Y-T),
+      saw(4850, GROUND_Y-T+2),
 
-      // section 10
-      sp(4000,GROUND_Y-T), sp(4040,GROUND_Y-T), sp(4080,GROUND_Y-T), sp(4120,GROUND_Y-T), sp(4160,GROUND_Y-T), sp(4200,GROUND_Y-T),
+      // section 10 — final stretch, just 3 spikes
+      sp(5200, GROUND_Y-T), sp(5360, GROUND_Y-T), sp(5520, GROUND_Y-T),
 
-      // section 11 — complex
-      saw(4400, GROUND_Y-T+2), plt(4540, 300, T*3),
-      sp(4760,GROUND_Y-T), sp(4800,GROUND_Y-T), sp(4840,GROUND_Y-T),
+      // section 11 — 1 saw near end
+      saw(5900, GROUND_Y-T+2),
 
-      // section 12 — 4 saws
-      saw(5040, GROUND_Y-T+2), saw(5160, GROUND_Y-T+2), saw(5280, GROUND_Y-T+2), saw(5400, GROUND_Y-T+2),
-
-      // section 13 — finale
-      sp(5600,GROUND_Y-T), sp(5640,GROUND_Y-T), sp(5680,GROUND_Y-T), sp(5720,GROUND_Y-T), sp(5760,GROUND_Y-T),
-      saw(5940, GROUND_Y-T+2), saw(6060, GROUND_Y-T+2),
-      sp(6240,GROUND_Y-T), sp(6280,GROUND_Y-T), sp(6320,GROUND_Y-T), sp(6360,GROUND_Y-T), sp(6400,GROUND_Y-T), sp(6440,GROUND_Y-T),
+      // section 12 — 2 spikes then done
+      sp(6200, GROUND_Y-T), sp(6400, GROUND_Y-T),
     ],
   },
 
-  // ── LEVEL 2: Base After Base ────────────────────────────────────
+  // ── LEVEL 2: Base After Base (EASIER) ───────────────────────────
   {
     name: 'BASE AFTER BASE',
     accentColor: '#ff00ff',
@@ -176,44 +168,127 @@ const LEVELS = [
     obstacles: [
       ...row(0, 180, GROUND_Y, x => bl(x, GROUND_Y, T, 80)),
 
-      // denser from the start
-      sp(320,GROUND_Y-T), sp(360,GROUND_Y-T),
-      saw(480, GROUND_Y-T+2),
-      sp(600,GROUND_Y-T), sp(640,GROUND_Y-T), sp(680,GROUND_Y-T),
+      // Gently intro
+      sp(450, GROUND_Y-T),
+      saw(700, GROUND_Y-T+2),
 
-      plt(820, 290, T*2), plt(980, 250, T*2),
+      plt(950, 300, T*3),
+      sp(1200, GROUND_Y-T), sp(1280, GROUND_Y-T),
 
-      sp(1120,GROUND_Y-T), sp(1160,GROUND_Y-T), sp(1200,GROUND_Y-T), sp(1240,GROUND_Y-T), sp(1280,GROUND_Y-T),
+      saw(1550, GROUND_Y-T+2),
 
-      saw(1400,GROUND_Y-T+2), saw(1500,GROUND_Y-T+2),
+      sp(1850, GROUND_Y-T), sp(1950, GROUND_Y-T), sp(2050, GROUND_Y-T),
 
-      sp(1640,GROUND_Y-T), sp(1680,GROUND_Y-T), sp(1720,GROUND_Y-T),
+      plt(2300, 280, T*3), plt(2600, 250, T*3),
 
-      plt(1880,270,T*2), plt(2060,230,T*2), plt(2240,190,T*2),
+      saw(2900, GROUND_Y-T+2), saw(3100, GROUND_Y-T+2),
 
-      sp(2420,GROUND_Y-T), sp(2460,GROUND_Y-T), sp(2500,GROUND_Y-T), sp(2540,GROUND_Y-T), sp(2580,GROUND_Y-T), sp(2620,GROUND_Y-T),
+      sp(3400, GROUND_Y-T), sp(3500, GROUND_Y-T),
 
-      saw(2760,GROUND_Y-T+2), saw(2880,GROUND_Y-T+2), saw(3000,GROUND_Y-T+2),
+      plt(3750, 300, T*4),
 
-      sp(3160,GROUND_Y-T), sp(3200,GROUND_Y-T), sp(3240,GROUND_Y-T),
+      sp(4050, GROUND_Y-T), sp(4170, GROUND_Y-T), sp(4290, GROUND_Y-T),
 
-      plt(3400,300,T*3),
+      saw(4550, GROUND_Y-T+2),
 
-      sp(3640,GROUND_Y-T), sp(3680,GROUND_Y-T), sp(3720,GROUND_Y-T), sp(3760,GROUND_Y-T),
+      sp(4850, GROUND_Y-T), sp(4970, GROUND_Y-T),
 
-      saw(3900,GROUND_Y-T+2), saw(4020,GROUND_Y-T+2), saw(4140,GROUND_Y-T+2), saw(4260,GROUND_Y-T+2),
+      plt(5200, 270, T*3), plt(5500, 240, T*3),
 
-      sp(4440,GROUND_Y-T), sp(4480,GROUND_Y-T), sp(4520,GROUND_Y-T), sp(4560,GROUND_Y-T), sp(4600,GROUND_Y-T), sp(4640,GROUND_Y-T),
+      sp(5800, GROUND_Y-T), sp(5920, GROUND_Y-T), sp(6040, GROUND_Y-T),
 
-      plt(4820,270,T*2), plt(5000,230,T*2),
+      saw(6300, GROUND_Y-T+2),
+    ],
+  },
 
-      sp(5180,GROUND_Y-T), sp(5220,GROUND_Y-T), sp(5260,GROUND_Y-T),
+  // ── LEVEL 3: Neon City ─────────────────────────────────────────
+  {
+    name: 'NEON CITY',
+    accentColor: '#ff6600',
+    accentColor2: '#ffaa00',
+    bgLayers: ['#0a0500', '#140a00', '#1e0f00'],
+    groundColor: '#1e0f00',
+    groundLine: '#ff6600',
+    bgStarCount: 80,
+    obstacles: [
+      ...row(0, 180, GROUND_Y, x => bl(x, GROUND_Y, T, 80)),
 
-      saw(5400,GROUND_Y-T+2), saw(5520,GROUND_Y-T+2), saw(5640,GROUND_Y-T+2), saw(5760,GROUND_Y-T+2),
+      // Rooftop platforms — the city feeling
+      plt(300,  300, T*5),
+      plt(700,  270, T*4),
+      sp(960, GROUND_Y-T),
 
-      sp(5960,GROUND_Y-T), sp(6000,GROUND_Y-T), sp(6040,GROUND_Y-T), sp(6080,GROUND_Y-T), sp(6120,GROUND_Y-T),
+      plt(1150, 290, T*5),
+      saw(1500, GROUND_Y-T+2),
 
-      saw(6300,GROUND_Y-T+2), saw(6420,GROUND_Y-T+2),
+      plt(1700, 260, T*4),
+      sp(2000, GROUND_Y-T), sp(2080, GROUND_Y-T),
+
+      saw(2300, GROUND_Y-T+2),
+      plt(2500, 280, T*5),
+
+      sp(2850, GROUND_Y-T), sp(2970, GROUND_Y-T),
+      plt(3150, 300, T*4),
+
+      saw(3500, GROUND_Y-T+2),
+      sp(3750, GROUND_Y-T),
+
+      plt(3950, 260, T*5),
+      sp(4280, GROUND_Y-T), sp(4360, GROUND_Y-T),
+
+      saw(4600, GROUND_Y-T+2),
+      plt(4800, 280, T*4),
+
+      sp(5100, GROUND_Y-T), sp(5220, GROUND_Y-T), sp(5340, GROUND_Y-T),
+      saw(5580, GROUND_Y-T+2),
+
+      plt(5800, 270, T*4),
+      sp(6100, GROUND_Y-T), sp(6220, GROUND_Y-T),
+      saw(6450, GROUND_Y-T+2),
+    ],
+  },
+
+  // ── LEVEL 4: Cosmic Highway ────────────────────────────────────
+  {
+    name: 'COSMIC HIGHWAY',
+    accentColor: '#88ff00',
+    accentColor2: '#44ff88',
+    bgLayers: ['#000805', '#000e08', '#00140a'],
+    groundColor: '#00140a',
+    groundLine: '#88ff00',
+    bgStarCount: 200,
+    obstacles: [
+      ...row(0, 180, GROUND_Y, x => bl(x, GROUND_Y, T, 80)),
+
+      // Wide-open cosmic vibe — big gaps, rhythmic obstacles
+      sp(400, GROUND_Y-T),
+      saw(700, GROUND_Y-T+2),
+
+      plt(950, 320, T*5),
+      sp(1300, GROUND_Y-T),
+
+      saw(1600, GROUND_Y-T+2),
+      plt(1850, 300, T*4),
+
+      sp(2200, GROUND_Y-T), sp(2320, GROUND_Y-T),
+      saw(2600, GROUND_Y-T+2),
+
+      plt(2850, 280, T*5),
+      sp(3250, GROUND_Y-T),
+
+      saw(3550, GROUND_Y-T+2),
+      sp(3850, GROUND_Y-T), sp(3970, GROUND_Y-T),
+
+      plt(4200, 260, T*4),
+      saw(4600, GROUND_Y-T+2),
+
+      sp(4900, GROUND_Y-T), sp(5020, GROUND_Y-T), sp(5140, GROUND_Y-T),
+      plt(5350, 300, T*4),
+
+      saw(5700, GROUND_Y-T+2),
+      sp(6000, GROUND_Y-T), sp(6120, GROUND_Y-T),
+
+      saw(6380, GROUND_Y-T+2),
     ],
   },
 ];
@@ -480,8 +555,11 @@ function App() {
   const shakeRef     = useRef({ x:0, y:0, t:0 });
   const sawAngleRef  = useRef(0);
   const beatRef      = useRef({ lastBeat: 0, pulse: 0 });
+  const screenRef    = useRef('menu');  // kept in sync for instant jump access
 
   const [screen,       setScreen]       = useState('menu');      // menu | playing | dead | win
+  // keep a ref in sync so jump handler never reads a stale closure value
+  const setScreenSync = (s) => { screenRef.current = s; setScreen(s); };
   const [levelIdx,     setLevelIdx]     = useState(0);
   const [attempts,     setAttempts]     = useState(0);
   const [playerColor,  setPlayerColor]  = useState('#00ffcc');
@@ -843,7 +921,7 @@ function App() {
   // ── Screen transitions ────────────────────────────────────────
   const goToScreen = useCallback((s) => {
     setTransition(true);
-    setTimeout(() => { setScreen(s); setTransition(false); }, 300);
+    setTimeout(() => { setScreenSync(s); setTransition(false); }, 300);
   }, []);
 
   useEffect(() => {
@@ -863,8 +941,9 @@ function App() {
   }, [screen, levelIdx]);
 
   // ── Jump handler ──────────────────────────────────────────────
+  // Uses screenRef so this callback never has a stale closure — jump is instant
   const handleJump = useCallback(() => {
-    if (screen !== 'playing') return;
+    if (screenRef.current !== 'playing') return;
     const st = gameRef.current;
     if (!st) return;
     const p = st.player;
@@ -874,7 +953,7 @@ function App() {
       p.onGround = false;
       Audio.jump();
     }
-  }, [screen]);
+  }, []);  // no deps needed — reads refs directly
 
   useEffect(() => {
     const onKey = e => {
@@ -1134,7 +1213,7 @@ function App() {
           <div style={{ display:'flex', gap:14 }}>
             <button
               {...btnProps('retry','#ff3333')}
-              onClick={() => { Audio.click(); setScreen('playing'); }}
+              onClick={() => { Audio.click(); setScreenSync('playing'); }}
               style={{ ...S.btn('#ff3333',10), ...(hoveredBtn==='retry'?S.hoverBtn('#ff3333'):{}), animation:'bounce 1s ease infinite' }}
             >↺ RETRY</button>
             <button
